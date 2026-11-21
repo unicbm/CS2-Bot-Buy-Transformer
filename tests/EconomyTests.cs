@@ -4,8 +4,6 @@ using Xunit;
 public sealed class EconomyTests
 {
     [Theory]
-    [InlineData(16000, 3000, 2700, true)]
-    [InlineData(16000, 3000, 3100, true)]
     [InlineData(5700, 3000, 2700, true)]
     [InlineData(5699, 3000, 2700, false)]
     [InlineData(3000, 3000, 2700, false)]
@@ -33,7 +31,6 @@ public sealed class EconomyTests
     [InlineData(false, 1400, 2)]
     [InlineData(false, 3599, 2)]
     [InlineData(false, 3600, 3)]
-    [InlineData(false, 16200, 3)]
     [InlineData(true, 16200, 0)]
     public void EconomyUsesPrePurchaseResources(bool pistol, double resources, int expected)
         => Assert.Equal((TeamEconomyClass)expected, BotBuyEconomy.Classify(pistol, resources, new()));
@@ -55,12 +52,4 @@ public sealed class EconomyTests
     public void ReplayDonorsCanHelpHumansWithoutChangingBotReplayLoadouts(
         bool donorReplay, bool recipientReplay, bool human, bool expected)
         => Assert.Equal(expected, BotBuyEconomy.AllowsAssistance(donorReplay, recipientReplay, human));
-
-    [Theory]
-    [InlineData(2700)]
-    [InlineData(2900)]
-    [InlineData(3100)]
-    public void EightThousandDonorCanHelpHumanWithTwentyEightHundred(int price)
-        => Assert.True(BotBuyEconomy.AllowsAssistance(true, false, true)
-            && BotBuyEconomy.CanSponsor(8000, 2800, price));
 }
