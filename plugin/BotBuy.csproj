@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="../models/team-policy.json.gz" Link="team-policy.json.gz" CopyToOutputDirectory="PreserveNewest" />
     <None Update="buy-policy.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="pro-transformer.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="pro-primary-policy.json" CopyToOutputDirectory="PreserveNewest" />

@@ -12,7 +12,7 @@ namespace BotBuyPatch;
 public sealed partial class BotBuyPatch : BasePlugin
 {
     public override string ModuleName => "CS2 Bot Buy Transformer";
-    public override string ModuleVersion => "0.1.0";
+    public override string ModuleVersion => "0.1.0-preview.2";
     public override string ModuleAuthor => "unicbm; based on ed0ard";
     public override string ModuleDescription => "Professional team purchases and native sponsorship. Source: https://github.com/unicbm/CS2-Bot-Buy-Transformer";
 
@@ -48,6 +48,7 @@ public sealed partial class BotBuyPatch : BasePlugin
     public override void Load(bool hotReload)
     {
         _policy = BuyPolicyDocument.Load(Path.Combine(ModuleDirectory, "buy-policy.json"));
+        ConfigureLocalPlanner();
         NativeGameData.Configure(ModulePath);
         _native = new BotBuyNative(this);
         Console.WriteLine($"[BotBuy] native purchase hook active; policy demos={_policy.Training.DemoCount}");
@@ -70,7 +71,6 @@ public sealed partial class BotBuyPatch : BasePlugin
             _history.Clear();
             _matchRound = 0;
         });
-        ConfigureLocalPlanner();
         if (hotReload)
         {
             // Do not spend again on bots that already bought before a reload.
@@ -83,7 +83,7 @@ public sealed partial class BotBuyPatch : BasePlugin
     public override void Unload(bool hotReload)
     {
         ResetRound(false);
-        StopLocalPlanner();
+        _planner = null;
         _native?.Dispose();
         _native = null;
     }
@@ -158,7 +158,6 @@ public sealed partial class BotBuyPatch : BasePlugin
     public HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
     {
         ResetRound(true);
-        EnsureLocalPlanner();
         if ((_proPrimaries != null || _transformer != null) && PolicyEnabled()) CaptureProBuyInputs();
         QueuePurchases();
         return HookResult.Continue;

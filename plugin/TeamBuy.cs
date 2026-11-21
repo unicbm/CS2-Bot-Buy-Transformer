@@ -1,6 +1,3 @@
-using System.Diagnostics;
-using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -14,56 +11,13 @@ namespace BotBuyPatch;
 public sealed partial class BotBuyPatch
 {
     private bool _teamMode;
-    private string? _plannerRoot;
-    private Process? _planner;
-    private volatile int _plannerPort=41286;
+    private TeamPlanner? _planner;
     private int _humanAdvice;
 
     private void ConfigureLocalPlanner()
     {
-        _plannerRoot=Path.Combine(ModuleDirectory,"planner");
-        _teamMode=true;
-        EnsureLocalPlanner();
-    }
-
-    private void EnsureLocalPlanner()
-    {
-        if (!_teamMode || _plannerRoot==null || _planner is { HasExited:false }) return;
-        StopLocalPlanner();
-        try
-        {
-            var info=new ProcessStartInfo(Path.Combine(_plannerRoot,"python","python.exe"))
-            {
-                WorkingDirectory=_plannerRoot, UseShellExecute=false, CreateNoWindow=true,
-                RedirectStandardOutput=true
-            };
-            foreach (string arg in new[]{"-B","-u","pro_buy/serve.py","--port","0"}) info.ArgumentList.Add(arg);
-            var worker=new Process { StartInfo=info };
-            worker.OutputDataReceived+=(_,e)=>
-            {
-                const string prefix="BotBuy team planner ready on 127.0.0.1:";
-                if (worker==_planner && e.Data?.StartsWith(prefix)==true && int.TryParse(e.Data[prefix.Length..],out int port))
-                {
-                    _plannerPort=port;
-                    Console.WriteLine($"[BotBuy] Coordinated planner ready on {port}.");
-                }
-            };
-            _planner=worker;
-            worker.Start();
-            worker.BeginOutputReadLine();
-        }
-        catch (Exception ex) { _planner?.Dispose(); _planner=null; Console.WriteLine($"[BotBuy] Could not start planner: {ex.Message}"); }
-    }
-
-    private void StopLocalPlanner()
-    {
-        var worker=_planner;
-        _planner=null;
-        if (_plannerRoot!=null) _plannerPort=0;
-        if (worker==null) return;
-        try { if (!worker.HasExited) worker.Kill(entireProcessTree:true); }
-        catch (InvalidOperationException) { /* Already exited. */ }
-        finally { worker.Dispose(); }
+        _planner = TeamPlanner.Load(Path.Combine(ModuleDirectory, "team-policy.json.gz"));
+        _teamMode = true;
     }
 
     private static bool TeamParticipant(CCSPlayerController p) => p.IsValid && (HasBotIdentity(p) ? CanManageBot(p)
@@ -82,8 +36,6 @@ public sealed partial class BotBuyPatch
     private readonly Dictionary<CsTeam,int> _otBank = [];
     private int _teamPlans, _directGifts, _teamEpoch;
     private string _teamLast = "none yet";
-    private static readonly JsonSerializerOptions TeamJson = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-    private sealed record TeamReply(bool Covered, string[] Players, int[][] Transactions);
 
     [ConsoleCommand("css_bot_team_buy", "Professional five-player team purchases: 0/1 or status")]
     public void TeamMode(CCSPlayerController? caller, CommandInfo command)
@@ -91,10 +43,10 @@ public sealed partial class BotBuyPatch
         if (command.ArgCount == 2 && command.GetArg(1) is "0" or "1")
         {
             bool enabled = command.GetArg(1) == "1";
-            if (enabled != _teamMode) { _teamEpoch++; _teamMode = enabled; if(enabled) EnsureLocalPlanner(); else StopLocalPlanner(); }
+            if (enabled != _teamMode) { _teamEpoch++; _teamMode = enabled;  }
         }
         else if (command.ArgCount != 1) { command.ReplyToCommand("Usage: css_bot_team_buy [0|1]"); return; }
-        command.ReplyToCommand($"[BotBuy] Team={_teamMode} plans={_teamPlans} direct_gifts={_directGifts} advice={_humanAdvice} planner_port={_plannerPort} last={_teamLast}");
+        command.ReplyToCommand($"[BotBuy] Team={_teamMode} plans={_teamPlans} direct_gifts={_directGifts} advice={_humanAdvice} planner=managed last={_teamLast}");
     }
 
     private static int[] ItemIds(CCSPlayerController p)
@@ -114,7 +66,7 @@ public sealed partial class BotBuyPatch
 
     private bool BeginTeamPurchase(CsTeam side, List<CCSPlayerController> members)
     {
-        if (!_teamMode || _plannerPort==0 || members.Count != 5 || _teamTried.Contains(side) || _native == null ||
+        if (!_teamMode || _planner==null || members.Count != 5 || _teamTried.Contains(side) || _native == null ||
             ConVar.Find("mp_maxrounds")?.GetPrimitiveValue<int>() != 24) return false;
         var rules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault()?.GameRules;
         if (rules is not { FreezePeriod:true } || members.Any(p=>!TeamParticipant(p) || p.InGameMoneyServices == null || !_native.IsBuyAllowed(p)) ||
@@ -145,12 +97,12 @@ public sealed partial class BotBuyPatch
         int epoch=_teamEpoch, lifecycle=_round;
         _teamTried.Add(side);
         _teamClaimed.Add(side);
-        _ = RequestPlan(JsonSerializer.Serialize(request), reply =>
+        _ = RequestPlan(_planner, JsonSerializer.Serialize(request), reply =>
         {
             if (lifecycle!=_round || !_roundOpen || _native==null) return;
             try
             {
-                if (!_teamMode || _plannerPort==0 || epoch!=_teamEpoch || reply?.Covered!=true || !rules.FreezePeriod ||
+                if (!_teamMode || _planner==null || epoch!=_teamEpoch || reply?.Covered!=true || !rules.FreezePeriod ||
                     members.Where((p,i)=>!TeamParticipant(p) || p.Team!=side || p.PlayerPawn.Raw!=pawns[i] ||
                         p.EntityHandle.Raw!=controllers[i] || p.InGameMoneyServices?.Account!=cash[i] ||
                         !_native.IsBuyAllowed(p) || !ItemIds(p).SequenceEqual(ids[i]) ||
@@ -223,22 +175,18 @@ public sealed partial class BotBuyPatch
         return true;
     }
 
-    private async Task RequestPlan(string request,Action<TeamReply?> complete)
+    private async Task RequestPlan(TeamPlanner planner, string request, Action<TeamReply?> complete)
     {
-        TeamReply? reply=null;
+        TeamReply? reply = null;
         try
         {
-            using var timeout=new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
-            using var tcp=new TcpClient();
-            await tcp.ConnectAsync(System.Net.IPAddress.Loopback,_plannerPort,timeout.Token).ConfigureAwait(false);
-            using var stream=tcp.GetStream();
-            await stream.WriteAsync(Encoding.UTF8.GetBytes(request+"\n"),timeout.Token).ConfigureAwait(false);
-            using var reader=new StreamReader(stream);
-            string? response=await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
-            if (response!=null) reply=JsonSerializer.Deserialize<TeamReply>(response,TeamJson);
+            reply = await Task.Run(() => planner.Decide(request)).ConfigureAwait(false);
         }
-        catch(Exception ex) when(ex is IOException or SocketException or OperationCanceledException or JsonException)
-        { Console.WriteLine($"[BotBuy] Team planner unavailable: {ex.Message}"); }
-        Server.NextFrame(()=>complete(reply));
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BotBuy] Team planner failed: {ex}");
+        }
+        if (ReferenceEquals(planner, _planner))
+            Server.NextFrame(() => { if (ReferenceEquals(planner, _planner)) complete(reply); });
     }
 }
