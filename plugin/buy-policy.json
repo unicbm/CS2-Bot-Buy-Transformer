@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "economy_thresholds": {
+    "eco_max_exclusive": 1400,
+    "force_max_exclusive": 3600
+  },
+  "training": {
+    "demo_count": 10,
+    "player_round_samples": 2504
+  },
+  "policies": {
+    "ct": {
+      "pistol": {
+        "samples": 100,
+        "eligible": true,
+        "armor_rate": 0.69,
+        "helmet_rate": 0.0,
+        "defuser_rate": 0.09,
+        "primary_choices": [],
+        "secondary_upgrade_rate": 0.13,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_elite",
+            "count": 13,
+            "share": 0.13
+          }
+        ],
+        "utility_per_player": {
+          "weapon_flashbang": 0.24,
+          "weapon_hegrenade": 0.11,
+          "weapon_incgrenade": 0.02,
+          "weapon_smokegrenade": 0.19
+        }
+      },
+      "eco": {
+        "samples": 0,
+        "eligible": false,
+        "armor_rate": 0.0,
+        "helmet_rate": 0.0,
+        "defuser_rate": 0.0,
+        "primary_choices": [],
+        "secondary_upgrade_rate": 0.0,
+        "secondary_upgrades": [],
+        "utility_per_player": {}
+      },
+      "force": {
+        "samples": 5,
+        "eligible": false,
+        "armor_rate": 0.8,
+        "helmet_rate": 0.4,
+        "defuser_rate": 0.0,
+        "primary_choices": [
+          {
+            "item": "weapon_m4a1",
+            "count": 1,
+            "share": 0.2
+          },
+          {
+            "item": "weapon_mp9",
+            "count": 1,
+            "share": 0.2
+          }
+        ],
+        "secondary_upgrade_rate": 0.6,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_deagle",
+            "count": 2,
+            "share": 0.4
+          },
+          {
+            "item": "weapon_fiveseven",
+            "count": 1,
+            "share": 0.2
+          }
+        ],
+        "utility_per_player": {
+          "weapon_flashbang": 0.6,
+          "weapon_hegrenade": 0.2,
+          "weapon_smokegrenade": 0.8
+        }
+      },
+      "full": {
+        "samples": 1149,
+        "eligible": true,
+        "armor_rate": 0.915579,
+        "helmet_rate": 0.64839,
+        "defuser_rate": 0.399478,
+        "primary_choices": [
+          {
+            "item": "weapon_m4a1_silencer",
+            "count": 283,
+            "share": 0.246301
+          },
+          {
+            "item": "weapon_m4a1",
+            "count": 275,
+            "share": 0.239339
+          },
+          {
+            "item": "weapon_awp",
+            "count": 145,
+            "share": 0.126197
+          },
+          {
+            "item": "weapon_mp9",
+            "count": 67,
+            "share": 0.058312
+          },
+          {
+            "item": "weapon_famas",
+            "count": 28,
+            "share": 0.024369
+          },
+          {
+            "item": "weapon_mp7",
+            "count": 10,
+            "share": 0.008703
+          },
+          {
+            "item": "weapon_mp5sd",
+            "count": 5,
+            "share": 0.004352
+          }
+        ],
+        "secondary_upgrade_rate": 0.16101,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_fiveseven",
+            "count": 88,
+            "share": 0.076588
+          },
+          {
+            "item": "weapon_deagle",
+            "count": 75,
+            "share": 0.065274
+          },
+          {
+            "item": "weapon_elite",
+            "count": 13,
+            "share": 0.011314
+          },
+          {
+            "item": "weapon_p250",
+            "count": 9,
+            "share": 0.007833
+          }
+        ],
+        "utility_per_player": {
+          "weapon_flashbang": 0.795474,
+          "weapon_hegrenade": 0.70235,
+          "weapon_incgrenade": 0.706701,
+          "weapon_smokegrenade": 0.846823
+        }
+      }
+    },
+    "t": {
+      "pistol": {
+        "samples": 100,
+        "eligible": true,
+        "armor_rate": 0.68,
+        "helmet_rate": 0.0,
+        "defuser_rate": 0.0,
+        "primary_choices": [],
+        "secondary_upgrade_rate": 0.1,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_p250",
+            "count": 10,
+            "share": 0.1
+          }
+        ],
+        "utility_per_player": {
+          "weapon_decoy": 0.05,
+          "weapon_flashbang": 0.36,
+          "weapon_hegrenade": 0.02,
+          "weapon_molotov": 0.08,
+          "weapon_smokegrenade": 0.32
+        }
+      },
+      "eco": {
+        "samples": 35,
+        "eligible": true,
+        "armor_rate": 0.0,
+        "helmet_rate": 0.0,
+        "defuser_rate": 0.0,
+        "primary_choices": [],
+        "secondary_upgrade_rate": 0.085714,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_deagle",
+            "count": 2,
+            "share": 0.057143
+          },
+          {
+            "item": "weapon_p250",
+            "count": 1,
+            "share": 0.028571
+          }
+        ],
+        "utility_per_player": {
+          "weapon_decoy": 0.028571,
+          "weapon_smokegrenade": 0.057143
+        }
+      },
+      "force": {
+        "samples": 10,
+        "eligible": false,
+        "armor_rate": 0.9,
+        "helmet_rate": 0.8,
+        "defuser_rate": 0.0,
+        "primary_choices": [
+          {
+            "item": "weapon_ak47",
+            "count": 1,
+            "share": 0.1
+          }
+        ],
+        "secondary_upgrade_rate": 0.7,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_tec9",
+            "count": 5,
+            "share": 0.5
+          },
+          {
+            "item": "weapon_deagle",
+            "count": 2,
+            "share": 0.2
+          }
+        ],
+        "utility_per_player": {
+          "weapon_flashbang": 0.7,
+          "weapon_hegrenade": 0.2,
+          "weapon_molotov": 0.2,
+          "weapon_smokegrenade": 0.8
+        }
+      },
+      "full": {
+        "samples": 1105,
+        "eligible": true,
+        "armor_rate": 0.899548,
+        "helmet_rate": 0.846154,
+        "defuser_rate": 0.0,
+        "primary_choices": [
+          {
+            "item": "weapon_ak47",
+            "count": 630,
+            "share": 0.570136
+          },
+          {
+            "item": "weapon_galilar",
+            "count": 98,
+            "share": 0.088688
+          },
+          {
+            "item": "weapon_awp",
+            "count": 90,
+            "share": 0.081448
+          },
+          {
+            "item": "weapon_mac10",
+            "count": 38,
+            "share": 0.034389
+          }
+        ],
+        "secondary_upgrade_rate": 0.193665,
+        "secondary_upgrades": [
+          {
+            "item": "weapon_tec9",
+            "count": 101,
+            "share": 0.091403
+          },
+          {
+            "item": "weapon_deagle",
+            "count": 81,
+            "share": 0.073303
+          },
+          {
+            "item": "weapon_p250",
+            "count": 27,
+            "share": 0.024434
+          },
+          {
+            "item": "weapon_elite",
+            "count": 5,
+            "share": 0.004525
+          }
+        ],
+        "utility_per_player": {
+          "weapon_flashbang": 1.070588,
+          "weapon_hegrenade": 0.300452,
+          "weapon_molotov": 0.651584,
+          "weapon_smokegrenade": 0.791855
+        }
+      }
+    }
+  }
+}
