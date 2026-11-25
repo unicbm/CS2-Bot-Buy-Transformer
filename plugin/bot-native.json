@@ -24,6 +24,7 @@
     "buyPurchaseHookBytes": "0x5"
   },
   "signatures": {
+    "equipWeapon": "48 89 5C 24 ? 57 48 83 EC ? 48 83 79 ? ? 48 8B FA 48 8B D9 75 ? E8 ? ? ? ? 48 8B 53",
     "buyPurchase": "40 55 56 41 54 48 83 EC 40 41 0F B6 C1 44 8B E2 48 8B F1 45 84 C0 74 0B 80 79 4E 00 75 05 41 B1"
   },
   "relocations": {

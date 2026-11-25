@@ -3,6 +3,7 @@ using static CounterStrikeSharp.API.Modules.Memory.DataType;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using BotNative;
+using CounterStrikeSharp.API.Modules.Utils;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
@@ -21,14 +22,12 @@ internal sealed class BotBuyNative : IDisposable
     internal readonly record struct Offer(int Slot, int Price, ushort Definition);
     private readonly BotBuyPatch owner;
     private readonly MemoryFunctionWithReturn<nint, int, byte, byte, int> purchase;
+    private readonly MemoryFunctionVoid<nint, nint> equipWeapon;
     private readonly LoadoutItem loadoutItem;
     private readonly ItemPrice itemPrice;
     private readonly CanBuy canBuy;
     private nint permittedService, captureItemService, droppedWeapon;
     private ushort captureDefinition;
-    private nint sponsorView, recipientItems, sponsoredEntity;
-    private string? sponsoredName;
-    private bool sponsorHooked;
     private bool hooked, captureHooked;
 
     internal BotBuyNative(BotBuyPatch owner)
@@ -48,13 +47,13 @@ internal sealed class BotBuyNative : IDisposable
             data.VerifyDetour(server, "buyPurchase");
         else
             data.Verify(server, "buyPurchase");
+        equipWeapon = new(data.Signature("equipWeapon"));
         purchase = new(signature);
-        if (purchase.Handle == 0) throw new InvalidOperationException("Native purchase binding failed");
+        if (purchase.Handle == 0 || equipWeapon.Handle == 0) throw new InvalidOperationException("Native purchase or equip binding failed");
         try
         {
             purchase.Hook(OnPurchase, HookMode.Pre); hooked = true;
             VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveItem, HookMode.Post); captureHooked = true;
-            VirtualFunctions.GiveNamedItemFunc.Hook(OnSponsoredGrant, HookMode.Pre); sponsorHooked = true;
         }
         catch { Dispose(); throw; }
     }
@@ -75,16 +74,20 @@ internal sealed class BotBuyNative : IDisposable
     internal Offer? Quote(CCSPlayerController player, string itemName)
     {
         ushort definition = Definition(itemName);
-        if (player.InventoryServices is not { } inventory || player.PlayerPawn.Value?.WeaponServices is not { } weapons)
+        var pawn = player.PlayerPawn.Value;
+        if (player.InventoryServices is not { } inventory || pawn?.WeaponServices is not { } weapons)
             return null;
-        // Use the bot's real loadout, including InventorySimulator's replacements.
+        // The suit slot can refuse a second helmet. Repair its owner's vest using
+        // the vest slot, which leaves them with the requested full suit.
+        ushort slotDefinition = definition == 51 && pawn.ArmorValue < 100 && pawn.ItemServices is { } services &&
+            new CCSPlayer_ItemServices(services.Handle).HasHelmet ? (ushort)50 : definition;
         for (int slot = 0; slot < 58; slot++)
         {
             nint pointer = loadoutItem(inventory.Handle, (int)player.Team, slot);
             if (pointer == 0) continue;
             var item = new CEconItemView(pointer);
-            if (!item.Initialized || item.ItemDefinitionIndex != definition) continue;
-            int price = itemPrice(weapons.Handle, definition, pointer);
+            if (!item.Initialized || item.ItemDefinitionIndex != slotDefinition) continue;
+            int price = itemPrice(weapons.Handle, slotDefinition, pointer);
             return price >= 0 ? new Offer(slot, price, definition) : null;
         }
         return null;
@@ -118,60 +121,77 @@ internal sealed class BotBuyNative : IDisposable
         finally { permittedService = captureItemService = droppedWeapon = 0; }
     }
 
-    // The recipient's native buy handles pistol replacement and grenade stacking.
-    // Supply the payer's equipped econ view to the synchronous grant. Settle cash on
-    // the payer only after the recipient's native purchase succeeds.
-    internal bool Sponsor(CCSPlayerController payer, CCSPlayerController recipient, string name, Offer paid)
+    internal int? Sponsor(CCSPlayerController payer, CCSPlayerController recipient, string name, Offer paid)
     {
         if (payer.Team != recipient.Team || payer.EntityHandle.Raw == recipient.EntityHandle.Raw ||
             payer.InGameMoneyServices is not { } from || recipient.InGameMoneyServices is not { } to ||
-            payer.InventoryServices is not { } inventory || recipient.PlayerPawn.Value?.ItemServices is not { } items ||
-            from.Account < paid.Price || name.StartsWith("item_") || !IsBuyAllowed(payer) || !IsBuyAllowed(recipient) ||
-            Quote(recipient,name) is not { } offer || paid.Price != offer.Price) return false;
-        nint view=loadoutItem(inventory.Handle,(int)payer.Team,paid.Slot);
-        if (view==0 || !new CEconItemView(view).Initialized || new CEconItemView(view).ItemDefinitionIndex!=paid.Definition) return false;
+            from.Account < paid.Price || !IsBuyAllowed(payer) || !IsBuyAllowed(recipient) ||
+            Quote(recipient,name) is not { } offer || paid.Price != offer.Price) return null;
+
+        if (TeamPlanner.Portable(paid.Definition) && paid.Definition is not (>=43 and <=48))
+            return SponsorGun(payer, recipient, paid, offer);
+
+        // Grenade stacking and personal equipment upgrades are native recipient purchases.
         int balance=to.Account, spent=to.CashSpentThisRound, total=to.TotalCashSpent;
         int fromBalance=from.Account;
         bool accepted=false;
         try
         {
-            sponsorView=view; recipientItems=items.Handle; sponsoredName=name; sponsoredEntity=0;
-            to.Account=Math.Max(balance,offer.Price);
+            // Only the quoted budget is available to this synchronous native purchase.
+            to.Account=offer.Price;
             accepted=Buy(recipient,offer,false,out _);
-            if (!accepted) return false;
-            from.Account=fromBalance-paid.Price;
-            from.CashSpentThisRound+=paid.Price;
-            from.TotalCashSpent+=paid.Price;
-            if (sponsoredEntity!=0)
-            {
-                var weapon=new CBasePlayerWeapon(sponsoredEntity);
-                weapon.OriginalOwnerXuidLow=(uint)payer.SteamID;
-                weapon.OriginalOwnerXuidHigh=(uint)(payer.SteamID>>32);
-                Utilities.SetStateChanged(weapon,"CEconEntity","m_OriginalOwnerXuidLow");
-                Utilities.SetStateChanged(weapon,"CEconEntity","m_OriginalOwnerXuidHigh");
-            }
-            else if (paid.Definition is not (>=43 and <=48))
-                throw new InvalidOperationException("Native purchase accepted without the sponsored weapon grant");
-            return true;
+            if (!accepted) return null;
+            int charged=offer.Price-to.Account;
+            if (charged<0 || charged>offer.Price)
+                throw new InvalidOperationException($"Native charge outside sponsored budget: {name} ${charged}");
+            from.Account=fromBalance-charged;
+            from.CashSpentThisRound+=charged;
+            from.TotalCashSpent+=charged;
+            return charged;
         }
         finally
         {
-            sponsorView=recipientItems=sponsoredEntity=0; sponsoredName=null;
             to.Account=balance; to.CashSpentThisRound=spent; to.TotalCashSpent=total;
             Utilities.SetStateChanged(recipient,"CCSPlayerController","m_pInGameMoneyServices");
             if (accepted) Utilities.SetStateChanged(payer,"CCSPlayerController","m_pInGameMoneyServices");
         }
     }
 
-    private HookResult OnSponsoredGrant(DynamicHook hook)
+    private int? SponsorGun(CCSPlayerController payer, CCSPlayerController recipient, Offer paid, Offer offer)
     {
-        if (sponsorView==0 || hook.GetParam<nint>(0)!=recipientItems) return HookResult.Continue;
-        string name=hook.GetParam<string>(1);
-        if (name!=sponsoredName) return HookResult.Continue;
-        sponsoredEntity=VirtualFunctions.GiveNamedItemFunc.Invoke(recipientItems,name,hook.GetParam<nint>(2),
-            sponsorView,hook.GetParam<nint>(4),hook.GetParam<nint>(5),bypasshook:true);
-        hook.SetReturn(sponsoredEntity);
-        return HookResult.Handled;
+        if (recipient.InventoryServices is not { } inventory || recipient.PlayerPawn.Value is not { } pawn ||
+            pawn.ItemServices is not { } services || pawn.WeaponServices is not { } weapons) return null;
+        var items = services.As<CCSPlayer_ItemServices>();
+        nint view = loadoutItem(inventory.Handle, (int)recipient.Team, offer.Slot);
+        if (view == 0 || items.CanAcquire(new CEconItemView(view), AcquireMethod.PickUp) != AcquireResult.Allowed) return null;
+
+        // A native buy-and-drop runs the donor's cosmetic hooks and keeps their equipped gun.
+        // Hand over that very entity synchronously so no other player can pick it up.
+        var money = payer.InGameMoneyServices!;
+        int balance = money.Account, spent = money.CashSpentThisRound, total = money.TotalCashSpent;
+        if (!Buy(payer, paid, drop: true, out var drop)) return null;
+        var gun = drop!.As<CCSWeaponBase>();
+        var previous = gun.VData!.GearSlot == gear_slot_t.GEAR_SLOT_PISTOL
+            ? weapons.MyWeapons.Select(h => h.Value).FirstOrDefault(w =>
+                w is { IsValid: true } && w.As<CCSWeaponBase>().VData?.GearSlot == gear_slot_t.GEAR_SLOT_PISTOL)
+            : null;
+        gun.OriginalOwnerXuidLow = (uint)payer.SteamID;
+        gun.OriginalOwnerXuidHigh = (uint)(payer.SteamID >> 32);
+        Utilities.SetStateChanged(gun,"CEconEntity","m_OriginalOwnerXuidLow");
+        Utilities.SetStateChanged(gun,"CEconEntity","m_OriginalOwnerXuidHigh");
+        equipWeapon.Invoke(weapons.Handle, gun.Handle);
+        if (!weapons.MyWeapons.Any(h => h.Raw == gun.EntityHandle.Raw))
+        {
+            gun.Remove();
+            money.Account = balance;
+            money.CashSpentThisRound = spent;
+            money.TotalCashSpent = total;
+            Utilities.SetStateChanged(payer, "CCSPlayerController", "m_pInGameMoneyServices");
+            return null;
+        }
+        if (previous is { IsValid: true } && weapons.MyWeapons.Any(h => h.Raw == previous.EntityHandle.Raw))
+            items.DropActivePlayerWeapon(previous);
+        return balance - money.Account;
     }
 
     private HookResult OnPurchase(DynamicHook hook)
@@ -213,7 +233,6 @@ internal sealed class BotBuyNative : IDisposable
 
     public void Dispose()
     {
-        if (sponsorHooked) { VirtualFunctions.GiveNamedItemFunc.Unhook(OnSponsoredGrant,HookMode.Pre); sponsorHooked=false; }
         try { if (hooked) { purchase.Unhook(OnPurchase, HookMode.Pre); hooked = false; } }
         finally
         {

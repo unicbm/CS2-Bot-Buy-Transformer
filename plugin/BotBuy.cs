@@ -148,6 +148,8 @@ public sealed partial class BotBuyPatch : BasePlugin
         _queued = false;
         _processedPawns.Clear();
         _nativeEquipmentPawns.Clear();
+        _replayWaiting.Clear();
+        _replayWakeQueued = false;
         _teamClaimed.Clear();
         _teamTried.Clear();
         _giftedPawns.Clear();
@@ -224,7 +226,7 @@ public sealed partial class BotBuyPatch : BasePlugin
             {
                 var players = PlayerControllers().Where(player => IsUsablePlayer(player)
                     && player.Team is CsTeam.CounterTerrorist or CsTeam.Terrorist).ToList();
-                ApplyEvidencePolicy(players.Where(player => !IsDtrOwned(player)).ToList());
+                ApplyEvidencePolicy(players);
                 RunDropAssist(players);
             }
             catch (Exception ex)
@@ -269,10 +271,17 @@ public sealed partial class BotBuyPatch : BasePlugin
             var teamPlayers = roundPlayers.Where(player => IsUsablePlayer(player) && player.Team == team).ToList();
             var bots = teamPlayers.Where(player => CanManageBot(player)
                 && !_processedPawns.Contains(player.PlayerPawn.Raw) && _native.IsBuyAllowed(player)).ToList();
-            if (_teamClaimed.Contains(team) || bots.Count == 0)
+            if (_teamClaimed.Contains(team))
                 continue;
 
-            if (bots.Count == teamPlayers.Count(p=>HasBotIdentity(p)) && BeginTeamPurchase(team,teamPlayers)) continue;
+            _replayWaiting.Remove(team);
+            bool hasReplayDonors = teamPlayers.Any(p => HasBotIdentity(p) && IsDtrOwned(p)) &&
+                teamPlayers.Any(p => !HasBotIdentity(p) && !IsDtrOwned(p));
+            if ((bots.Count > 0 || hasReplayDonors) &&
+                bots.Count == teamPlayers.Count(p => HasBotIdentity(p) && !IsDtrOwned(p)) &&
+                BeginTeamPurchase(team, teamPlayers)) continue;
+            if (bots.Count == 0) continue;
+            teamPlayers.RemoveAll(IsDtrOwned);
 
             TeamEconomyClass economyClass = ClassifyEconomy(teamPlayers);
             string side = team == CsTeam.CounterTerrorist ? "ct" : "t";
@@ -483,13 +492,16 @@ public sealed partial class BotBuyPatch : BasePlugin
     private void RunDropAssist(List<CCSPlayerController> players)
     {
         if (_native == null || IsFirstRoundOfHalf()) return;
-        var recipients = players.Where(player => !_teamClaimed.Contains(player.Team) && CanReceiveDrop(player) && !HasPrimaryWeapon(player))
+        var recipients = players.Where(player => !_teamClaimed.Contains(player.Team) && !_replayWaiting.Contains(player.Team) && CanReceiveDrop(player) && !HasPrimaryWeapon(player))
             .OrderBy(player => player.InGameMoneyServices!.Account).ToList();
         foreach (var recipient in recipients)
         {
             if (!CanReceiveDrop(recipient) || HasPrimaryWeapon(recipient)
                 || _giftedPawns.Contains(recipient.PlayerPawn.Raw)) continue;
-            foreach (var donor in players.Where(player => player != recipient && player.Team == recipient.Team
+            bool coordinatedReplay = _teamMode && !HasBotIdentity(recipient) &&
+                ConVar.Find("mp_maxrounds")?.GetPrimitiveValue<int>() == 24 &&
+                PlayerControllers().Count(p => !p.IsHLTV && p.Team == recipient.Team) == 5;
+            foreach (var donor in players.Where(player => (!coordinatedReplay || !IsDtrOwned(player)) && player != recipient && player.Team == recipient.Team
                 && IsAutonomousBot(player) && HasPrimaryWeapon(player)
                 && (_processedPawns.Contains(player.PlayerPawn.Raw) || IsDtrOwned(player))
                 && BotBuyEconomy.AllowsAssistance(IsDtrOwned(player), IsDtrOwned(recipient), IsHumanControlled(recipient)))
@@ -514,8 +526,8 @@ public sealed partial class BotBuyPatch : BasePlugin
                 Utilities.SetStateChanged(weapon, "CEconEntity", "m_OriginalOwnerXuidLow");
                 Utilities.SetStateChanged(weapon, "CEconEntity", "m_OriginalOwnerXuidHigh");
                 weapon!.Teleport(new Vector(origin.X, origin.Y, origin.Z + 8), null, new Vector(0, 0, 0));
-                foreach (var teammate in players.Where(player => player.IsValid && !HasBotIdentity(player) && player.Team == donor.Team))
-                    teammate.PrintToChat($"{ChatColors.Green}{donor.PlayerName}{ChatColors.Yellow}: {recipient.PlayerName}, I dropped a weapon for ya");
+                if (!HasBotIdentity(recipient))
+                    recipient.PrintToChat($" {ChatColors.Green}{donor.PlayerName} 发枪 {ChatColors.Default}{BuyLabel(weapon.DesignerName)} {ChatColors.Grey}· 在你脚下");
                 break;
             }
         }
@@ -771,6 +783,12 @@ public sealed partial class BotBuyPatch : BasePlugin
 
         [DllImport("dtr-controller", CallingConvention = CallingConvention.Cdecl)]
         private static extern int DtrController_GetBuyPlanItemCount(int slot);
+
+        [DllImport("dtr-controller", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int DtrController_GetReplayCursor(int slot);
+
+        // Replay starts after DTR has applied its optional round-start balance.
+        public static bool Started(int slot) => DtrController_GetReplayCursor(slot) >= 0;
 
         public static bool HasPlan(int slot)
         {

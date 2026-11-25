@@ -7,7 +7,7 @@ namespace BotBuyPatch;
 internal sealed record OpeningTemplate(int Side, bool Pistol, bool Overtime, double[][] X, int[][] Edges);
 internal sealed record TeamWeights(Dictionary<string, double[]> Departure, Dictionary<string, double[]> Opening,
     Dictionary<string, int> Roles, Dictionary<string, int> OpeningRoles, Dictionary<int, Dictionary<int, int>> Menu,
-    Dictionary<int, Dictionary<int, int>> OpeningMenu, int[][] Kits, OpeningTemplate[] Bank);
+    Dictionary<int, Dictionary<int, int>> OpeningMenu, int[][] Kits, OpeningTemplate[] Bank, double[]? TerroristAkArmorLogWeights);
 internal sealed record TeamReply(bool Covered, string[] Players, int[][] Transactions);
 
 internal sealed partial class TeamPlanner(TeamWeights data)
@@ -16,14 +16,17 @@ internal sealed partial class TeamPlanner(TeamWeights data)
     private static readonly int[] Guns = [7, 8, 9, 10, 11, 13, 14, 16, 17, 19, 23, 24, 25, 26, 27, 28, 29, 33, 34, 35, 38, 39, 40, 60];
     private static readonly int[] Pistols = [1, 2, 3, 4, 30, 32, 36, 61, 63, 64];
     private static readonly int[] Five = [0, 1, 2, 3, 4];
-    private static bool Portable(int item) => item is not (50 or 51 or 55);
-    private sealed record Player(string Id, string Name, int Cash, bool Human, int Side, int Round, bool OT,
+    internal static bool Portable(int item) => item is not (50 or 51 or 55);
+    private sealed record Player(string Id, string Name, int Cash, bool Human, bool ReplayDonor, int Side, int Round, bool OT,
         int[] Start, double[] Features, Dictionary<int, int> Shop, Dictionary<int, int> OpeningShop);
     internal static TeamPlanner Load(string path)
     {
         using var file = File.OpenRead(path);
         using var stream = new GZipStream(file, CompressionMode.Decompress);
-        return new(JsonSerializer.Deserialize<TeamWeights>(stream) ?? throw new InvalidDataException("Missing team weights"));
+        var model = JsonSerializer.Deserialize<TeamWeights>(stream) ?? throw new InvalidDataException("Missing team weights");
+        if (model.TerroristAkArmorLogWeights is { } w && (w.Length != 4 || !w.All(double.IsFinite)))
+            throw new InvalidDataException("Invalid AK armor calibration");
+        return new(model);
     }
     private Player Parse(JsonElement r)
     {
@@ -53,7 +56,7 @@ internal sealed partial class TeamPlanner(TeamWeights data)
             Num("own_point"),Num("opp_point"),Num("overtime"),Num("ot_half_round")/3,Num("ot_reset_cash")/10000,
             ..start.Skip(6).Select(v=>(double)v),..Guns.Select(v=>v==start[0]?1d:0),..Pistols.Select(v=>v==start[1]?1d:0)];
         return new(r.GetProperty("player").GetString()!, r.GetProperty("name").GetString()!.Trim().ToLowerInvariant(),
-            (int)Num("cash"), r.TryGetProperty("human", out var human) && human.GetBoolean(), side, round, Num("overtime") != 0, start,
+            (int)Num("cash"), r.TryGetProperty("human", out var human) && human.GetBoolean(), r.TryGetProperty("replay_donor", out var replay) && replay.GetBoolean(), side, round, Num("overtime") != 0, start,
             features, Menu(data.Menu), Menu(data.OpeningMenu));
     }
     private static double[][] Context(Player[] t, Dictionary<string, int> roles) => t.Select(p =>
@@ -72,11 +75,39 @@ internal sealed partial class TeamPlanner(TeamWeights data)
         if (t.Length != 5 || t.Select(p => p.Id).Distinct().Count() != 5 || t.Any(p => p.Side != t[0].Side || p.Round != t[0].Round))
             throw new InvalidDataException("Expected five teammates");
         int[][]? edges = null;
-        if (t[0].Round is 1 or 13 && t.All(p => p.Cash == 800 && p.Start[0] == 0 && p.Start[2] == 0))
+        if (!t.Any(p => p.ReplayDonor) && t[0].Round is 1 or 13 && t.All(p => p.Cash == 800 && p.Start[0] == 0 && p.Start[2] == 0))
             edges = ChooseOpening(t, uniform);
         edges ??= ChooseDeparture(t, uniform);
-        return new(true, t.Select(p => p.Id).ToArray(), edges.Select(e => new[] { e[0], e[1], e[2], t[e[0]].Shop[e[2]] }).ToArray());
+        // Opening templates are shared. Return fresh receipts before changing any payer.
+        var receipts = edges.Select(e => new[] { e[0], e[1], e[2], t[e[1]].Shop[e[2]] }).ToArray();
+        if (t.Any(p => p.Human))
+        {
+            var remaining = t.Select(p => p.Cash).ToArray();
+            foreach (var e in receipts) remaining[e[0]] -= e[3];
+            SponsorHumanPurchases(t, receipts, remaining);
+        }
+        return new(true, t.Select(p => p.Id).ToArray(), receipts);
     }
+    private static bool CanSponsor(Player donor, Player receiver, int item, int price) =>
+        !donor.Human && (!donor.ReplayDonor || receiver.Human) &&
+        (Portable(item) ? donor.Shop.GetValueOrDefault(item, -1) == price : receiver.Human);
+
+    private static void SponsorHumanPurchases(Player[] team, int[][] edges, int[] cash, bool replayOnly = false)
+    {
+        foreach (var e in edges.Where(e => e[0] == e[1] && team[e[1]].Human)
+                     .OrderByDescending(e => team[e[1]].Shop[e[2]]))
+        {
+            int receiver = e[1], item = e[2], price = team[receiver].Shop[item];
+            int donor = Five.Where(a => (!replayOnly || team[a].ReplayDonor) && cash[a] >= price &&
+                CanSponsor(team[a], team[receiver], item, price)).OrderByDescending(a => team[a].ReplayDonor)
+                .ThenByDescending(a => cash[a]).FirstOrDefault(-1);
+            if (donor < 0) continue;
+            cash[donor] -= price;
+            cash[receiver] += price;
+            e[0] = donor;
+        }
+    }
+
     private static int Sample(double[] probabilities, Func<double> uniform)
     {
         double value = uniform() * probabilities.Sum(), cum = 0;
