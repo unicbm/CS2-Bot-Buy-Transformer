@@ -81,7 +81,14 @@ internal sealed class TeamNetwork(Dictionary<string, double[]> weights)
     internal double[][] Encode(string project, double[][] x)
     {
         var input = x.Select((row, i) => Linear(project, row, row: i)).ToArray();
-        var qkv = input.Select((row, i) => Linear("encoder.self_attn.in_proj", row, "_", i)).ToArray();
+        if (tensors.ContainsKey("encoder.0.self_attn.in_proj_weight"))
+            return EncodeLayer("encoder.1", EncodeLayer("encoder.0", input));
+        return EncodeLayer("encoder", input);
+    }
+
+    private double[][] EncodeLayer(string layer, double[][] input)
+    {
+        var qkv = input.Select((row, i) => Linear(layer + ".self_attn.in_proj", row, "_", i)).ToArray();
         int width = input[0].Length, head = width / 4;
         var result = new double[input.Length][];
         for (int i = 0; i < input.Length; i++)
@@ -115,8 +122,8 @@ internal sealed class TeamNetwork(Dictionary<string, double[]> weights)
                     joined[k] = value * inverse;
                 }
             }
-            var h = Normalize("encoder.norm1", Linear("encoder.self_attn.out_proj", joined, row: i), input[i]);
-            result[i] = Normalize("encoder.norm2", Linear("encoder.linear2", Relu(Linear("encoder.linear1", h, row: i)), row: i), h);
+            var h = Normalize(layer + ".norm1", Linear(layer + ".self_attn.out_proj", joined, row: i), input[i]);
+            result[i] = Normalize(layer + ".norm2", Linear(layer + ".linear2", Relu(Linear(layer + ".linear1", h, row: i)), row: i), h);
         }
         return result;
     }
