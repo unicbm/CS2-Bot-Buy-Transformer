@@ -1,4 +1,4 @@
-param([string]$Output = 'artifacts/CS2-Bot-Buy-Transformer-win-x64.zip')
+param([string]$Output = 'artifacts/CS2-Bot-Buy-Transformer-win-x64.zip', [switch]$Int8)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $build = Join-Path $root 'artifacts/plugin'
@@ -14,6 +14,7 @@ try {
     try {
         foreach ($name in $files + $docs) {
             $source = if ($name -in $files) { Join-Path $build $name } else { Join-Path $root $name }
+            if ($Int8 -and $name -eq 'team-policy.json.gz') { $source = Join-Path $root 'models/team-policy-int8.json.gz' }
             [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $source, $prefix + $name)
         }
     } finally { $archive.Dispose() }

@@ -5,9 +5,11 @@ using static BotBuyPatch.TeamNetwork;
 namespace BotBuyPatch;
 
 internal sealed record OpeningTemplate(int Side, bool Pistol, bool Overtime, double[][] X, int[][] Edges);
+internal sealed record Int8Matrix(byte[] Values, float[] Scales);
 internal sealed record TeamWeights(Dictionary<string, double[]> Departure, Dictionary<string, double[]> Opening,
     Dictionary<string, int> Roles, Dictionary<string, int> OpeningRoles, Dictionary<int, Dictionary<int, int>> Menu,
-    Dictionary<int, Dictionary<int, int>> OpeningMenu, int[][] Kits, OpeningTemplate[] Bank, double[]? TerroristAkArmorLogWeights);
+    Dictionary<int, Dictionary<int, int>> OpeningMenu, int[][] Kits, OpeningTemplate[] Bank, double[]? TerroristAkArmorLogWeights,
+    Dictionary<string, Int8Matrix>? DepartureInt8 = null);
 internal sealed record TeamReply(bool Covered, string[] Players, int[][] Transactions);
 
 internal sealed partial class TeamPlanner(TeamWeights data)
@@ -26,6 +28,21 @@ internal sealed partial class TeamPlanner(TeamWeights data)
         var model = JsonSerializer.Deserialize<TeamWeights>(stream) ?? throw new InvalidDataException("Missing team weights");
         if (model.TerroristAkArmorLogWeights is { } w && (w.Length != 4 || !w.All(double.IsFinite)))
             throw new InvalidDataException("Invalid AK armor calibration");
+        if (model.DepartureInt8 is { } matrices)
+        {
+            foreach (var (name, matrix) in matrices)
+            {
+                int rows = matrix.Scales.Length;
+                if (rows == 0 || matrix.Values.Length == 0 || matrix.Values.Length % rows != 0)
+                    throw new InvalidDataException("Invalid INT8 matrix " + name);
+                int columns = matrix.Values.Length / rows;
+                var values = new double[matrix.Values.Length];
+                for (int i = 0; i < values.Length; i++)
+                    values[i] = unchecked((sbyte)matrix.Values[i]) * matrix.Scales[i / columns];
+                model.Departure.Add(name, values);
+            }
+            model = model with { DepartureInt8 = null };
+        }
         return new(model);
     }
     private Player Parse(JsonElement r)

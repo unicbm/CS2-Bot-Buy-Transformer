@@ -12,7 +12,7 @@ namespace BotBuyPatch;
 public sealed partial class BotBuyPatch : BasePlugin
 {
     public override string ModuleName => "CS2 Bot Buy Transformer";
-    public override string ModuleVersion => "0.1.0";
+    public override string ModuleVersion => "0.1.1";
     public override string ModuleAuthor => "unicbm; based on ed0ard";
     public override string ModuleDescription => "Professional team purchases and native sponsorship. Source: https://github.com/unicbm/CS2-Bot-Buy-Transformer";
 
